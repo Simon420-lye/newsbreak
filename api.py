@@ -41,29 +41,56 @@ def news():
     if data is None:
         return jsonify({"error": "No data yet — run fetch.py first."}), 404
 
-    category = request.args.get("category")
+    topic = request.args.get("topic")
     limit = request.args.get("limit", type=int)
 
-    articles = data["articles"]
-    if category:
-        articles = [a for a in articles if a["category"] == category]
+    stories = data.get("stories", [])
+    if topic:
+        stories = [s for s in stories if topic in s.get("topics", [])]
     if limit:
-        articles = articles[:limit]
+        stories = stories[:limit]
 
     return jsonify({
         "generated_at": data["generated_at"],
-        "count": len(articles),
-        "articles": articles,
+        "topics": data.get("topics", {}),
+        "count": len(stories),
+        "stories": stories,
     })
-
 
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
 
+@app.route("/api/debug")
+def debug():
+    info = {
+        "data_file": DATA_FILE,
+        "exists": os.path.exists(DATA_FILE),
+        "fetch_has_cluster": hasattr(fetch, "cluster"),   # proves new fetch.py is deployed
+        "feed_count": len(getattr(fetch, "FEEDS", [])),
+    }
+    if info["exists"]:
+        info["size_bytes"] = os.path.getsize(DATA_FILE)
+        try:
+            with open(DATA_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            info["keys"] = list(d)
+            info["story_count"] = len(d.get("stories", []))
+            info["article_count"] = len(d.get("articles", []))
+            info["generated_at"] = d.get("generated_at")
+        except Exception as e:
+            info["read_error"] = str(e)
+    return jsonify(info)
 
-#if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+
+@app.route("/api/refresh")
+def manual_refresh():
+    try:
+        payload = fetch.run(DATA_FILE)
+        return jsonify({"ok": True, "stories": len(payload.get("stories", []))})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
